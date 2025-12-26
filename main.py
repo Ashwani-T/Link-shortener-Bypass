@@ -20,4 +20,4 @@ async def post_init(app):
 
 app.post_init = post_init
 
-app.run_polling()
+app.run_polling(timeout=60, read_timeout=60, write_timeout=60, connect_timeout=60)
