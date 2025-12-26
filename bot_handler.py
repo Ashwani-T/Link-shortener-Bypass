@@ -6,6 +6,7 @@ from telegram.ext import (
     filters,
     CommandHandler
 )
+import asyncio
 from telegram.constants import ParseMode
 import os
 from dotenv import load_dotenv
@@ -14,10 +15,14 @@ from bypass_service import bypass_url
 from user_client import client
 from queue_state import lock, request_counter
 from logger import logger
+from telegram.error import TimedOut, NetworkError, RetryAfter
+
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+active_users = set()
+
 
 def create_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -70,11 +75,24 @@ async def handle_message(update, context):
         f"user_id={user_id} | username={username} | text={text}"
     )
 
+
+
     text = update.message.text
 
     if not is_valid_url(text):
         await update.message.reply_text("❌ Please send a valid URL")
         return
+
+    
+
+    if user_id in active_users:
+        await update.message.reply_text(
+                "⏳ You already have a request in progress. Please wait."
+            )
+        return
+
+    active_users.add(user_id)
+
 
     async with lock:
         context.application.bot_data["request_counter"] += 1
@@ -92,4 +110,19 @@ async def handle_message(update, context):
         (update, context, text, status_message)
     )
 
+
         
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    error = context.error
+
+    if isinstance(error, RetryAfter):
+        wait_time = error.retry_after
+        print(f"⏳ Flood control hit. Sleeping for {wait_time} seconds...")
+        await asyncio.sleep(wait_time)
+        return
+
+    if isinstance(error, (TimedOut, NetworkError)):
+        print("⚠️ Network/Telegram timeout occurred, ignored.")
+        return
+
+    print("❌ Unexpected error:", error)
